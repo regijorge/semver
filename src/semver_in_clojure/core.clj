@@ -1,4 +1,4 @@
 (ns semver-in-clojure.core)
 
 (defn hello []
-  (println "hello"))
+  (println "This is core"))
