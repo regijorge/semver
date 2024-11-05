@@ -1,0 +1,84 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  release:
+    name: Generate Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Determine Version Bump
+        id: version
+        run: |
+          # Fetch all tags and find the latest semantic version tag
+          git fetch --tags
+          LATEST_TAG=$(git tag --list "v[0-9]*.[0-9]*.[0-9]*" --sort=-v:refname | head -n 1 || echo "v0.0.0")
+          echo "Latest semantic version tag: $LATEST_TAG"
+
+          # Remove the 'v' prefix for easier parsing
+          LATEST_TAG=${LATEST_TAG#v}
+
+          # Parse the latest tag into major, minor, and patch parts
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$LATEST_TAG"
+
+          # Initialize counters for version bumps
+          MAJOR_BUMP_COUNT=0
+          MINOR_BUMP_COUNT=0
+          PATCH_BUMP_COUNT=0
+
+          # Get commit messages since the latest semantic version tag in chronological order
+          COMMITS=$(git log "v$LATEST_TAG"..HEAD --reverse --format="%s%n%b")
+          echo "Commits since last tag (in chronological order):"
+          echo "$COMMITS"
+
+          # Process each commit message to count bumps
+          while IFS= read -r COMMIT; do
+            if [[ "$COMMIT" == *"BREAKING CHANGE:"* ]] || [[ "$COMMIT" =~ ^(feat|fix)!: ]]; then
+              MAJOR_BUMP_COUNT=$((MAJOR_BUMP_COUNT + 1))
+              MINOR_BUMP_COUNT=0
+              PATCH_BUMP_COUNT=0
+            elif [[ "$COMMIT" == feat:* ]]; then
+              MINOR_BUMP_COUNT=$((MINOR_BUMP_COUNT + 1))
+              PATCH_BUMP_COUNT=0
+            elif [[ "$COMMIT" == fix:* ]]; then
+              PATCH_BUMP_COUNT=$((PATCH_BUMP_COUNT + 1))
+            fi
+          done <<< "$COMMITS"
+
+          # Apply the bumps based on the counts
+          if (( MAJOR_BUMP_COUNT > 0 )); then
+            MAJOR=$((MAJOR + MAJOR_BUMP_COUNT))
+            MINOR=0
+            PATCH=0
+          fi
+
+          if (( MINOR_BUMP_COUNT > 0 )); then
+            MINOR=$((MINOR + MINOR_BUMP_COUNT))
+            PATCH=0
+          fi
+
+          if (( PATCH_BUMP_COUNT > 0 )); then
+            PATCH=$((PATCH + PATCH_BUMP_COUNT))
+          fi
+
+          # Construct the new version with 'v' prefix for all bumps
+          VERSION="v$MAJOR.$MINOR.$PATCH"
+          echo "New version: $VERSION"
+          echo "version=$VERSION" >> $GITHUB_ENV
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ env.version }}
+          name: Release ${{ env.version }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
